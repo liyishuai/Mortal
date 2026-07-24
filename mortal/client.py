@@ -2,11 +2,12 @@ import prelude
 
 import logging
 import socket
-import torch
 import numpy as np
 import time
 import gc
 from os import path
+from backend import clear_cache, configure_device
+from checkpoint import load_model_weights
 from model import Brain, DQN
 from player import TrainPlayer
 from common import send_msg, recv_msg
@@ -14,16 +15,17 @@ from config import config
 
 def main():
     remote = (config['online']['remote']['host'], config['online']['remote']['port'])
-    device = torch.device(config['control']['device'])
+    configure_device(config['control'].get('device', 'auto'))
     version = config['control']['version']
     num_blocks = config['resnet']['num_blocks']
     conv_channels = config['resnet']['conv_channels']
 
-    mortal = Brain(version=version, num_blocks=num_blocks, conv_channels=conv_channels).to(device).eval()
-    dqn = DQN(version=version).to(device)
-    if config['online']['enable_compile']:
-        mortal.compile()
-        dqn.compile()
+    mortal = Brain(
+        version=version,
+        num_blocks=num_blocks,
+        conv_channels=conv_channels,
+    ).eval()
+    dqn = DQN(version=version).eval()
 
     train_player = TrainPlayer()
     param_version = -1
@@ -41,16 +43,16 @@ def main():
                     'param_version': param_version,
                 }
                 send_msg(conn, msg)
-                rsp = recv_msg(conn, map_location=device)
+                rsp = recv_msg(conn)
                 if rsp['status'] == 'ok':
                     param_version = rsp['param_version']
                     break
                 time.sleep(3)
-        mortal.load_state_dict(rsp['mortal'])
-        dqn.load_state_dict(rsp['dqn'])
+        load_model_weights(mortal, rsp['mortal'])
+        load_model_weights(dqn, rsp['dqn'])
         logging.info('param has been updated')
 
-        rankings, file_list = train_player.train_play(mortal, dqn, device)
+        rankings, file_list = train_player.train_play(mortal, dqn)
         avg_rank = rankings @ np.arange(1, 5) / rankings.sum()
         avg_pt = rankings @ pts / rankings.sum()
 
@@ -78,8 +80,7 @@ def main():
             })
             logging.info('logs have been submitted')
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        clear_cache()
 
 if __name__ == '__main__':
     try:

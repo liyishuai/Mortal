@@ -11,7 +11,7 @@
 * [Benchmarks]()
 
 # User Guide
-* [Docker Quick Start](user/docker.md)
+* [Apple Silicon Quick Start](user/docker.md)
 * [Build](user/build.md)
 * [Training]()
     * [Pre-Trained Model]()

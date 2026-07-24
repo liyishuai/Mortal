@@ -5,6 +5,8 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-    - tqdm
-    - toml
-    - tensorboard
+    - mlx>=0.31.2
+    - msgpack>=1.1
+    - numpy>=2
+    - tensorboardX>=2.6
+    - tqdm>=4.66

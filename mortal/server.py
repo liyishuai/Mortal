@@ -2,11 +2,9 @@ import prelude
 
 import logging
 import shutil
-import torch
 import sys
 import os
 from os import path
-from io import BytesIO
 from typing import *
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -61,7 +59,6 @@ class Handler(BaseRequestHandler):
             return
 
         client_param_version = msg['param_version']
-        buf = BytesIO()
         with S.param_lock:
             if S.force_sequential and S.idle_param_version <= client_param_version:
                 res = {'status': 'trainer is busy'}
@@ -72,8 +69,7 @@ class Handler(BaseRequestHandler):
                     'dqn': S.dqn_param,
                     'param_version': S.param_version,
                 }
-            torch.save(res, buf)
-        self.send_msg(buf.getbuffer(), packed=True)
+        self.send_msg(res)
 
     def handle_submit_replay(self, msg):
         with S.dir_lock:

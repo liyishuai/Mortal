@@ -1,0 +1,51 @@
+name: test-mlx
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mlx.yml
+      - Cargo*
+      - environment.yml
+      - libriichi/**
+      - mortal/**
+      - tests/**
+  pull_request:
+    paths:
+      - .github/workflows/mlx.yml
+      - Cargo*
+      - environment.yml
+      - libriichi/**
+      - mortal/**
+      - tests/**
+
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: environment.yml
+      - name: Install MLX runtime dependencies
+        run: |
+          python -m pip install \
+            "mlx>=0.31.2" \
+            "msgpack>=1.1" \
+            "numpy>=2" \
+            "tensorboardX>=2.6" \
+            "tqdm>=4.66"
+      - name: Verify Apple Silicon Metal
+        run: |
+          python -c 'import platform, mlx.core as mx; assert platform.machine() == "arm64"; assert mx.metal.is_available()'
+      - name: Build and smoke-test the native extension
+        run: |
+          export PYO3_PYTHON="$(which python)"
+          cargo build -p libriichi --lib --release
+          cp target/release/libriichi.dylib mortal/libriichi.so
+          cd mortal
+          python -c 'import libriichi, mlx.core as mx; from libriichi.consts import ACTION_SPACE, obs_shape; from model import Brain, DQN; brain = Brain(version=4, conv_channels=16, num_blocks=1); dqn = DQN(version=4); obs = mx.zeros((1, *obs_shape(4))); mask = mx.ones((1, ACTION_SPACE), dtype=mx.bool_); q = dqn(brain(obs), mask); mx.eval(q); assert q.shape == (1, ACTION_SPACE)'
+      - name: Run MLX backend tests
+        run: python -m unittest discover -s tests -v

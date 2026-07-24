@@ -1,86 +1,137 @@
 # Build
-## Build required components
-### Prerequisites
-To build and use Mortal, you need to have a Python environment and an up-to-date Rust compiler. If you plan to train, make sure you have a GPU installed.
 
-It is recommended to use [miniconda](https://docs.conda.io/en/latest/miniconda.html) and [rustup](https://rustup.rs/) to setup the environment.
+## Prerequisites
 
-Instructions below will assume you already have miniconda and Rust installed.
+The MLX backend requires:
 
-### Clone
+- an Apple Silicon Mac running macOS 14 or newer;
+- a native arm64 Python 3.11 or newer; and
+- Xcode Command Line Tools (`xcode-select --install`); and
+- an up-to-date Rust toolchain.
+
+Rosetta/x86 Python cannot use MLX. Mortal uses the Metal GPU by default and
+shares memory between the CPU and GPU, so there is no CUDA or PyTorch
+installation step.
+
+## Clone and create the environment
+
 ```shell
 $ git clone https://github.com/Equim-chan/Mortal.git
 $ cd Mortal
-```
-
-From now on, the root directory of Mortal will be demonstrated as `$MORTAL_ROOT`.
-
-### Create and activate a conda env
-> Working directory: `$MORTAL_ROOT`
-```shell
 $ conda env create -f environment.yml
 $ conda activate mortal
 ```
 
-### Install pytorch
-pytorch is not listed as a dependency in `environment.yml` on purpose so that users can install it with their favored ways as per their requirement, hardware and OS.
+Confirm that Python and MLX see the native GPU:
 
-Check [pytorch's doc](https://pytorch.org/get-started/locally/) on how to install pytorch in your environment. Personally, I recommend installing pytorch with pip.
-
-```admonish tip
-Only `torch` is needed. You can skip the installation of `torchvision` and `torchaudio`.
+```shell
+$ python -c 'import platform, mlx.core as mx; print(platform.machine(), mx.default_device())'
+arm64 Device(gpu, 0)
 ```
 
-### Build and install libriichi
-> Working directory: `$MORTAL_ROOT`
+## Build and install libriichi
+
+> Working directory: the Mortal repository root.
+
 ```shell
 $ cargo build -p libriichi --lib --release
+$ cp target/release/libriichi.dylib mortal/libriichi.so
 ```
 
-For Linux
+Test the Python extension and Metal execution:
+
 ```shell
-$ cp target/release/libriichi.so mortal/libriichi.so
+$ PYTHONPATH=mortal python -c 'import libriichi, mlx.core as mx; x = mx.ones((2, 2)); mx.eval(x @ x); print("ready")'
+ready
 ```
 
-For Windows (MSYS2)
+## Configure Mortal
+
+> Working directory: the Mortal repository root.
+
 ```shell
-$ cp target/release/riichi.dll mortal/libriichi.pyd
+$ cp mortal/config.example.toml mortal/config.toml
 ```
 
-### Test the environment
-> Working directory: `$MORTAL_ROOT/mortal`
+At minimum, set `control.state_file` to a native MLX `.safetensors`
+checkpoint. `device = "gpu"` selects Metal; `"auto"` falls back to the CPU
+when Metal is unavailable. Checkpoints contain model arrays, optimizer state,
+and JSON metadata in one safe, portable Safetensors file.
+
+## Convert an existing PyTorch checkpoint
+
+The runtime has no PyTorch dependency. To reuse an old `.pth` model, perform a
+one-time conversion in a temporary environment that has both PyTorch and MLX:
+
 ```shell
-$ python
-Python 3.9.7 | packaged by conda-forge | (default, Sep 29 2021, 19:23:11)
-[GCC 9.4.0] on linux
-Type "help", "copyright", "credits" or "license" for more information.
->>> import libriichi
->>> help(libriichi)
+$ python mortal/convert_torch_checkpoint.py \
+    old-model.pth mortal.safetensors
 ```
+
+Convert the separate game-result predictor with:
+
+```shell
+$ python mortal/convert_torch_checkpoint.py \
+    --grp old-grp.pth grp.safetensors
+```
+
+Conv1d kernels are transposed into MLX layout, and stacked GRU parameters are
+mapped to native `mlx.nn.GRU` layers. GRP is converted from float64 to float32
+because Metal does not support float64. Optimizer state is intentionally reset;
+model weights, configuration, counters, timestamps, and tags are retained.
+
+Dataset file indexes also changed from Torch serialization to JSON. Delete old
+`.pth` indexes and let Mortal rebuild the configured `.json` indexes.
+When reusing an old config, replace every `cuda:*` device with `"gpu"` or
+`"auto"` and remove the obsolete CUDA/cuDNN/AMP options. Also remove
+`dataset.num_workers`: native MLX batching currently performs dataset and
+Rust/GRP preprocessing in the training process. If Metal utilization is low,
+increase `dataset.file_batch_size` within the available unified memory.
+
+## Online training compatibility
+
+The MLX migration replaces Torch's online parameter serialization with a
+versioned MessagePack protocol. Trainer, server, and worker processes must be
+upgraded and restarted together; the new runtime rejects legacy or mismatched
+wire versions with an explicit error.
+
+## Run inference
+
+```shell
+$ (cd mortal && ./mortal 0 < /absolute/path/to/log.json)
+```
+
+Set `MORTAL_CFG=/absolute/path/to/config.toml` when the configuration is not
+in the current directory.
 
 ## Optional targets
+
+> Working directory: the Mortal repository root.
+
 ### Run tests
-> Working directory: `$MORTAL_ROOT`
+
 ```shell
 $ cargo test --workspace --no-default-features --features flate2/zlib -- --nocapture
+$ python -m unittest discover -s tests -v
 ```
 
 ### Run benchmarks
-> Working directory: `$MORTAL_ROOT`
+
 ```shell
 $ cargo test -p libriichi --no-default-features --bench bench
 ```
 
 ### Build executable utilities
-> Working directory: `$MORTAL_ROOT`
+
 ```shell
 $ cargo build -p libriichi --bins --no-default-features --release
 $ cargo build -p exe-wrapper --release
 ```
 
 ### Build documentation
-> Working directory: `$MORTAL_ROOT/docs`
+
 ```shell
+$ cd docs
 $ cargo install mdbook mdbook-admonish mdbook-pagetoc
 $ mdbook build
 ```

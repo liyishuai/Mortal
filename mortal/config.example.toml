@@ -5,13 +5,11 @@
 version = 4
 online = false
 
-state_file = '/path/to/mortal.pth'
-best_state_file = '/path/to/best.pth'
+state_file = '/path/to/mortal.safetensors'
+best_state_file = '/path/to/best.safetensors'
 tensorboard_dir = '/path/to/dir'
 
-device = 'cuda:0'
-enable_cudnn_benchmark = false
-enable_amp = false
+device = 'gpu'
 enable_compile = false
 
 batch_size = 512
@@ -36,10 +34,9 @@ log_dir = '/path/to/test_play'
 
 [dataset]
 globs = ['/path/to/dataset/**/*.json.gz']
-file_index = '/path/to/file_index.pth'
+file_index = '/path/to/file_index.json'
 file_batch_size = 15
 reserve_ratio = 0.0
-num_workers = 1
 player_names_files = []
 num_epochs = 1
 enable_augmentation = false
@@ -76,14 +73,12 @@ warm_up_steps = 0
 max_steps = 0
 
 [baseline.train]
-device = 'cuda:0'
 enable_compile = false
-state_file = '/path/to/baseline.pth'
+state_file = '/path/to/baseline.safetensors'
 
 [baseline.test]
-device = 'cuda:0'
 enable_compile = false
-state_file = '/path/to/baseline.pth'
+state_file = '/path/to/baseline.safetensors'
 
 [online]
 history_window = 50
@@ -108,21 +103,18 @@ iters = 500
 log_dir = '/path/to/1v3'
 
 [1v3.challenger]
-device = 'cuda:0'
+device = 'gpu'
 name = 'mortal'
-state_file = '/path/to/challenger.pth'
+state_file = '/path/to/challenger.safetensors'
 stochastic_latent = false
 enable_compile = false
-enable_amp = true
 enable_rule_based_agari_guard = true
 
 [1v3.champion]
-device = 'cuda:0'
 name = 'baseline'
-state_file = '/path/to/baseline.pth'
+state_file = '/path/to/baseline.safetensors'
 stochastic_latent = false
 enable_compile = false
-enable_amp = true
 enable_rule_based_agari_guard = true
 
 [1v3.akochan]
@@ -131,15 +123,15 @@ dir = '/path/to/akochan'
 tactics = '/path/to/tactics.json'
 
 [grp]
-state_file = '/path/to/grp.pth'
+state_file = '/path/to/grp.safetensors'
 
 [grp.network]
 hidden_size = 64
 num_layers = 2
 
 [grp.control]
-device = 'cuda:0'
-enable_cudnn_benchmark = false
+device = 'gpu'
+enable_compile = false
 tensorboard_dir = 'grp_v2/log'
 
 batch_size = 512
@@ -159,7 +151,7 @@ val_globs = [
     '/path/to/dataset/2021/11/**/*.json.gz',
     # ...
 ]
-file_index = '/path/to/grp_file_index.pth'
+file_index = '/path/to/grp_file_index.json'
 file_batch_size = 50
 
 [grp.optim]

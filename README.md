@@ -15,6 +15,12 @@
 
 Mortal ([凡夫](https://www.mdbg.net/chinese/dictionary?wdqb=%E5%87%A1%E5%A4%AB)) is a free and open source AI for Japanese mahjong, powered by deep reinforcement learning.
 
+The neural-network backend is native
+[MLX](https://github.com/ml-explore/mlx), optimized for inference and training
+on Apple Silicon Metal GPUs. See the [build
+guide](https://mortal.ekyu.moe/user/build.html) for setup and one-time PyTorch
+checkpoint conversion.
+
 Read the [**Documentation**](https://mortal.ekyu.moe) for everything about this work.
 
 ## Okay cool now give me the weights!

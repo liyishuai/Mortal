@@ -1,70 +1,131 @@
-import torch
 import socket
 import struct
 import time
-from typing import *
-from io import BytesIO
 from functools import partial
+
+import mlx.core as mx
+import msgpack
+import numpy as np
 from tqdm.auto import tqdm as orig_tqdm
+
+from checkpoint import model_weights
 from config import config
 
-tqdm = partial(orig_tqdm, unit='batch', dynamic_ncols=True, ascii=True)
 
-def parameter_count(module):
-    return sum(p.numel() for p in module.parameters() if p.requires_grad)
+tqdm = partial(orig_tqdm, unit="batch", dynamic_ncols=True, ascii=True)
+_ARRAY_EXT = 1
+_WIRE_MAGIC = b"MORTAL-MLX"
+_WIRE_VERSION = 1
+_WIRE_HEADER = _WIRE_MAGIC + struct.pack("<H", _WIRE_VERSION)
+
 
 def filtered_trimmed_lines(lines):
-    return filter(lambda l: l, map(lambda l: l.strip(), lines))
+    return filter(lambda line: line, map(lambda line: line.strip(), lines))
 
-def iter_grads(parameters, take=False):
-    for p in parameters:
-        if p.grad is not None:
-            if take:
-                # Set to zero instead of None to preserve the layout and make it
-                # easier to assign back later
-                yield p.grad.clone()
-                p.grad.zero_()
-            else:
-                yield p.grad
 
 def drain():
-    remote = (config['online']['remote']['host'], config['online']['remote']['port'])
+    remote = (
+        config["online"]["remote"]["host"],
+        config["online"]["remote"]["port"],
+    )
     while True:
         with socket.socket() as conn:
             conn.connect(remote)
-            send_msg(conn, {'type': 'drain'})
+            send_msg(conn, {"type": "drain"})
             msg = recv_msg(conn)
-        if msg['count'] == 0:
+        if msg["count"] == 0:
             time.sleep(5)
             continue
-        return msg['drain_dir']
+        return msg["drain_dir"]
+
 
 def submit_param(mortal, dqn, is_idle=False):
-    remote = (config['online']['remote']['host'], config['online']['remote']['port'])
+    remote = (
+        config["online"]["remote"]["host"],
+        config["online"]["remote"]["port"],
+    )
     with socket.socket() as conn:
         conn.connect(remote)
-        send_msg(conn, {
-            'type': 'submit_param',
-            'mortal': mortal.state_dict(),
-            'dqn': dqn.state_dict(),
-            'is_idle': is_idle,
-        })
+        send_msg(
+            conn,
+            {
+                "type": "submit_param",
+                "mortal": model_weights(mortal),
+                "dqn": model_weights(dqn),
+                "is_idle": is_idle,
+            },
+        )
+
+
+def _pack_default(value):
+    if isinstance(value, mx.array):
+        mx.eval(value)
+        value = np.array(value)
+    if isinstance(value, np.ndarray):
+        shape = value.shape
+        contiguous = np.ascontiguousarray(value)
+        payload = msgpack.packb(
+            (contiguous.dtype.str, shape, contiguous.tobytes()),
+            use_bin_type=True,
+        )
+        return msgpack.ExtType(_ARRAY_EXT, payload)
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(f"Cannot encode {type(value).__name__}")
+
+
+def _unpack_ext(code, payload):
+    if code != _ARRAY_EXT:
+        return msgpack.ExtType(code, payload)
+    dtype, shape, data = msgpack.unpackb(payload, raw=False)
+    return (
+        np.frombuffer(data, dtype=np.dtype(dtype))
+        .reshape(tuple(shape))
+        .copy()
+    )
+
+
+def pack_msg(msg) -> bytes:
+    payload = msgpack.packb(msg, default=_pack_default, use_bin_type=True)
+    return _WIRE_HEADER + payload
+
+
+def unpack_msg(data: bytes):
+    if not data.startswith(_WIRE_MAGIC):
+        raise WireProtocolError(
+            "Online protocol mismatch: expected the versioned MLX "
+            "MessagePack protocol. Upgrade the trainer, server, and workers "
+            "together."
+        )
+    if len(data) < len(_WIRE_HEADER):
+        raise WireProtocolError("Truncated Mortal online protocol header")
+    (version,) = struct.unpack(
+        "<H", data[len(_WIRE_MAGIC) : len(_WIRE_HEADER)]
+    )
+    if version != _WIRE_VERSION:
+        raise WireProtocolError(
+            f"Unsupported Mortal online protocol version {version}; "
+            f"expected {_WIRE_VERSION}"
+        )
+    return msgpack.unpackb(
+        data[len(_WIRE_HEADER) :],
+        raw=False,
+        ext_hook=_unpack_ext,
+        strict_map_key=False,
+    )
+
 
 def send_msg(conn: socket.socket, msg, packed=False):
-    if packed:
-        tx = msg
-    else:
-        buf = BytesIO()
-        torch.save(msg, buf)
-        tx = buf.getbuffer()
-    conn.sendall(struct.pack('<Q', len(tx)))
+    tx = msg if packed else pack_msg(msg)
+    conn.sendall(struct.pack("<Q", len(tx)))
     conn.sendall(tx)
 
-def recv_msg(conn: socket.socket, map_location='cpu'):
-    rx = recv_binary(conn, 8)
-    (size,) = struct.unpack('<Q', rx)
-    rx = recv_binary(conn, size)
-    return torch.load(BytesIO(rx), weights_only=True, map_location=map_location)
+
+def recv_msg(conn: socket.socket, map_location=None):
+    del map_location
+    (size,) = struct.unpack("<Q", recv_binary(conn, 8))
+    return unpack_msg(recv_binary(conn, size))
+
 
 def recv_binary(conn: socket.socket, size):
     assert size > 0
@@ -78,6 +139,11 @@ def recv_binary(conn: socket.socket, size):
         buf = buf[n:]
     return bytes(ret)
 
+
 class UnexpectedEOF(Exception):
     def __init__(self):
-        super().__init__('unexpected EOF')
+        super().__init__("unexpected EOF")
+
+
+class WireProtocolError(ValueError):
+    pass

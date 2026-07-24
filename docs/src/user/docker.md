@@ -1,19 +1,27 @@
-# Docker Quick Start
-A handy `Dockerfile` has been added to the project for an easy and quick start.
+# Apple Silicon Quick Start
+Mortal uses [MLX](https://github.com/ml-explore/mlx) and runs its neural
+networks natively on the Apple Silicon Metal GPU.
 
 ```admonish warning
-This Docker image is only designed for inference with mjai interface and is not targeted for training.
+Run Mortal directly on macOS. Docker Desktop runs Linux in a virtual machine
+and does not expose the host Metal GPU to MLX.
 ```
 
-## Build
+## Install
 ```shell
 $ git clone https://github.com/Equim-chan/Mortal.git
 $ cd Mortal
-$ sudo env DOCKER_BUILDKIT=1 docker build -t mortal:latest .
+$ conda env create -f environment.yml
+$ conda activate mortal
+$ cargo build -p libriichi --lib --release
+$ cp target/release/libriichi.dylib mortal/libriichi.so
 ```
 
 ## Prepare a trained model
-The Docker image does not contain any model file of Model, therefore it must be prepared separately under a directory, which will be demonstrated as `/path/to/model/dir` below. In this example, snapshot `mortal1-b40c192-t22040618` is used.
+Create `mortal/config.toml` from `mortal/config.example.toml` and set
+`control.state_file` to an MLX `.safetensors` checkpoint. Existing PyTorch
+checkpoints can be converted once with `convert_torch_checkpoint.py`; see the
+[build guide](build.md#convert-an-existing-pytorch-checkpoint).
 
 ## Example
 We are going to use Mortal to evaluate the next move for the scene shown in _Figure 1_.
@@ -125,10 +133,11 @@ Mortal speaks mjai <!-- TODO: link to doc -->, a simple and easy-to-read stream 
 {"type":"tsumo","actor":2,"pai":"9p"}
 ```
 
-Save the mjai log content above into a file named `log.json`, then run:
+Save the mjai log content above into a file named `log.json`, then run from
+the `mortal` directory:
 
 ```shell
-$ sudo docker run -i --rm -v /path/to/model/dir:/mnt mortal 2 < log.json
+$ ./mortal 2 < log.json
 ```
 
 This will output a series of new-line-separated JSONs, each of which represents Mortal's reaction to an mjai event that it is able to react to, with the last line corresponding to the scene illustrated above:
